@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>W-TinyLFU 算法可视化</title>
+<style>
+  :root{
+    --bg:#0e1320; --panel:#161d30; --panel2:#141a2c; --border:#232c46; --border2:#2c3a5e;
+    --text:#dce4f5; --muted:#7e8aa6; --blue:#4ea1ff; --green:#46d7a8; --amber:#f0b355; --red:#ff6b7a; --purple:#b98bff;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;}
+  header{position:sticky;top:0;z-index:20;background:rgba(14,19,32,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:10px 18px;}
+  .header-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;max-width:1080px;margin:0 auto;}
+  .brand{font-weight:800;font-size:18px;color:#e6ecfb;margin-right:auto;}
+  .brand b{color:var(--blue);}
+  .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  button{font:inherit;cursor:pointer;border:1px solid var(--border2);background:#1b2440;color:#cdd6ee;padding:7px 13px;border-radius:8px;transition:all .15s;}
+  button:hover{background:#243056;border-color:#3a4d7d;}
+  button.active{background:#2a4a86;border-color:var(--blue);color:#fff;}
+  button.playing{background:#2a4a86;border-color:var(--blue);color:#fff;}
+  .seg{display:inline-flex;border:1px solid var(--border2);border-radius:8px;overflow:hidden;}
+  .seg button{border:none;border-radius:0;background:transparent;padding:7px 12px;}
+  .seg button:hover{background:#243056;}
+  .seg button.active{background:#2a4a86;color:#fff;}
+  input[type=number],select{width:64px;background:#11182a;border:1px solid var(--border2);color:#cdd6ee;border-radius:6px;padding:5px;font:inherit;text-align:center;}
+  input[type=range]{accent-color:var(--blue);width:130px;vertical-align:middle;}
+  label.lbl{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:13px;}
+  .modehint{font-size:11px;color:var(--purple);}
+  /* workload info bar */
+  .wl-info-row{max-width:1080px;margin:8px auto 0;}
+  .wl-info{font-size:12.5px;line-height:1.6;color:#9aa6c6;background:#11182a;border:1px solid var(--border);border-radius:9px;padding:8px 13px;display:flex;gap:8px 16px;flex-wrap:wrap;align-items:baseline;}
+  .wl-info .wl-name{font-weight:800;color:#eaf0ff;font-size:13px;background:#2a4a86;border:1px solid var(--blue);border-radius:6px;padding:2px 10px;flex-shrink:0;}
+  .wl-info .wl-field b{color:#cdd6ee;font-weight:700;}
+  .wl-info .wl-field.watch b{color:var(--amber);}
+  .wl-info .wl-sep{color:var(--border2);}
+  main{max-width:1080px;margin:16px auto;padding:0 16px 60px;}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:14px;}
+  .card-title{font-size:14px;font-weight:700;color:#e6ecfb;margin-bottom:10px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;}
+  .hint{font-size:12px;color:var(--muted);font-weight:400;}
+
+  /* access stream */
+  .stream{display:flex;gap:6px;align-items:center;min-height:34px;overflow:hidden;}
+  .chip{flex:0 0 auto;min-width:26px;height:30px;padding:0 4px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:1.5px solid;animation:chipin .25s ease;}
+  .chip.hit{background:rgba(70,215,168,.12);border-color:rgba(70,215,168,.5);color:#7be8c4;}
+  .chip.miss{background:rgba(255,107,122,.1);border-color:rgba(255,107,122,.45);color:#ff9ba6;}
+  @keyframes chipin{from{transform:translateY(-8px) scale(.7);opacity:0;}to{transform:none;opacity:1;}}
+
+  /* cache stage */
+  .stage{position:relative;min-height:178px;}
+  .layer{position:absolute;inset:0;}
+  .layer.hidden{display:none;}
+  .row-label{position:absolute;left:6px;width:108px;font-size:12px;font-weight:600;color:#9aa6c6;line-height:1.3;}
+  .row-label .cnt{display:inline-block;background:#222c48;color:#cdd6ee;border-radius:6px;padding:1px 8px;font-size:11px;margin-top:3px;}
+  .item{position:absolute;left:0;top:0;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#eaf0ff;background:#2b3658;border:1.5px solid #3d4d78;transition:transform .45s cubic-bezier(.5,.05,.2,1),opacity .35s,background .3s,border-color .3s,box-shadow .3s;will-change:transform;opacity:0;}
+  .item.region-window{background:#1f3a5f;border-color:#3b6ea5;}
+  .item.region-protected{background:#1f4a36;border-color:#3aa56a;}
+  .item.region-probationary{background:#4a3a1f;border-color:#a57a3b;}
+  .item.active{box-shadow:0 0 0 3px rgba(120,180,255,.9),0 0 22px rgba(120,180,255,.55);z-index:5;}
+  .item.flash-admit{box-shadow:0 0 0 3px rgba(80,220,120,.95),0 0 26px rgba(80,220,120,.7);z-index:6;}
+  .item.flash-reject{box-shadow:0 0 0 3px rgba(255,107,122,.95),0 0 26px rgba(255,107,122,.7);z-index:6;}
+  .item.flash-evict{box-shadow:0 0 0 3px rgba(255,107,122,.95),0 0 26px rgba(255,107,122,.7);z-index:6;}
+  .item.flash-keep{box-shadow:0 0 0 3px rgba(240,179,85,.85),0 0 20px rgba(240,179,85,.5);z-index:6;}
+  .dir-hint{font-size:12px;color:var(--muted);margin-top:6px;}
+
+  /* aggregate mode */
+  .agg-layer{display:flex;flex-direction:column;justify-content:space-evenly;padding:6px 0;gap:8px;}
+  .agg-row{display:flex;align-items:center;gap:10px;}
+  .agg-label{width:108px;font-size:12px;font-weight:600;color:#9aa6c6;line-height:1.3;flex-shrink:0;}
+  .agg-label .cnt{display:inline-block;background:#222c48;color:#cdd6ee;border-radius:6px;padding:1px 7px;font-size:11px;margin-top:3px;}
+  .agg-bar-wrap{flex:1;min-width:0;}
+  .agg-bar{height:24px;background:#11182a;border:1px solid #232c46;border-radius:6px;position:relative;overflow:hidden;transition:box-shadow .3s;}
+  .agg-bar>.agg-fill{height:100%;transition:width .4s ease;}
+  .agg-bar .agg-count{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:12px;color:#cdd6ee;font-weight:700;}
+  .agg-chips{display:flex;gap:4px;margin-top:5px;min-height:22px;flex-wrap:wrap;}
+  .agg-chips .chip2{min-width:22px;height:22px;padding:0 4px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:1px solid;}
+  .agg-fill.region-window{background:linear-gradient(90deg,#1f3a5f,#3b6ea5);}
+  .agg-fill.region-protected{background:linear-gradient(90deg,#1f4a36,#3aa56a);}
+  .agg-fill.region-probationary{background:linear-gradient(90deg,#4a3a1f,#a57a3b);}
+  .chip2.region-window{background:rgba(59,110,165,.25);border-color:rgba(59,110,165,.6);color:#9fc4ee;}
+  .chip2.region-protected{background:rgba(58,165,106,.22);border-color:rgba(58,165,106,.6);color:#8fe0b6;}
+  .chip2.region-probationary{background:rgba(165,122,59,.22);border-color:rgba(165,122,59,.6);color:#e6c896;}
+  .agg-bar.flash-admit{box-shadow:0 0 0 2px rgba(80,220,120,.95),0 0 18px rgba(80,220,120,.6);}
+  .agg-bar.flash-reject{box-shadow:0 0 0 2px rgba(240,179,85,.9),0 0 16px rgba(240,179,85,.5);}
+  .agg-bar.flash-evict{box-shadow:0 0 0 2px rgba(255,107,122,.95),0 0 18px rgba(255,107,122,.6);}
+  .agg-bar.flash-hit{box-shadow:0 0 0 2px rgba(120,180,255,.9),0 0 16px rgba(120,180,255,.5);}
+
+  /* sketch */
+  .sketch-wrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;}
+  .sketch-grid{display:grid;gap:4px;flex:1;min-width:0;max-width:600px;}
+  .sketch-grid.age-flash{animation:ageflash .8s ease;}
+  @keyframes ageflash{0%{box-shadow:0 0 0 0 rgba(185,139,255,0);}30%{box-shadow:0 0 26px 4px rgba(185,139,255,.7);}100%{box-shadow:0 0 0 0 rgba(185,139,255,0);}}
+  .sketch-cell{aspect-ratio:1;min-height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#e6f0ff;border-radius:5px;background:#1a2238;border:1px solid #232c46;transition:background .25s;position:relative;}
+  .sketch-cell.pulse{animation:cellpulse .55s ease;}
+  @keyframes cellpulse{0%{transform:scale(1);}30%{transform:scale(1.28);box-shadow:0 0 14px rgba(120,200,255,.95);}100%{transform:scale(1);}}
+  .age-info{min-width:150px;font-size:12px;color:#9aa6c6;}
+  .age-info b{color:#cdd6ee;font-size:13px;}
+  .agebar{height:9px;background:#1a2238;border-radius:5px;overflow:hidden;margin-top:6px;border:1px solid #232c46;}
+  .agebar>div{height:100%;background:linear-gradient(90deg,var(--purple),#7a5fff);transition:width .2s;}
+
+  /* admission */
+  .admission{display:flex;align-items:center;gap:16px;font-size:13px;flex-wrap:wrap;}
+  .cmp{display:flex;align-items:center;gap:8px;}
+  .cmp .role{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;width:64px;}
+  .cmp .key{font-weight:800;font-size:20px;color:#fff;min-width:18px;text-align:center;max-width:60px;overflow:hidden;text-overflow:ellipsis;}
+  .cmp .bar{width:96px;height:14px;background:#1a2238;border-radius:4px;overflow:hidden;border:1px solid #232c46;}
+  .cmp .bar>div{height:100%;transition:width .3s;}
+  .cmp.cand .bar>div{background:var(--blue);}
+  .cmp.vict .bar>div{background:var(--amber);}
+  .cmp .freq{font-weight:700;color:#cdd6ee;min-width:18px;}
+  .vs{color:var(--muted);font-weight:700;}
+  .verdict{margin-left:auto;font-weight:700;padding:7px 13px;border-radius:8px;font-size:13px;}
+  .verdict.ok{background:rgba(70,215,168,.15);color:var(--green);}
+  .verdict.no{background:rgba(255,107,122,.15);color:var(--red);}
+  .muted{color:var(--muted);}
+
+  /* stats */
+  .stats{display:flex;flex-wrap:wrap;gap:10px;}
+  .stat{background:#11182a;border:1px solid var(--border);border-radius:10px;padding:8px 14px;min-width:84px;}
+  .stat .num{display:block;font-size:20px;font-weight:800;color:#e6ecfb;}
+  .stat .lbl{font-size:11px;color:var(--muted);}
+  .stat.hl .num{color:var(--blue);}
+
+  /* legend */
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#9aa6c6;align-items:center;}
+  .legend .sw{display:inline-block;width:13px;height:13px;border-radius:3px;margin-right:5px;vertical-align:middle;border:1px solid rgba(255,255,255,.15);}
+  .notes{font-size:12.5px;color:#9aa6c6;line-height:1.7;}
+  .notes b{color:#cdd6ee;}
+  .notes code{background:#11182a;border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:#cfe;}
+
+  /* step narration */
+  .narr-empty{color:var(--muted);font-size:13px;padding:4px 2px;}
+  .narr-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:10px;border-bottom:1px dashed var(--border);}
+  .narr-step{font-weight:800;color:#e6ecfb;font-size:14px;}
+  .narr-key{font-weight:800;font-size:17px;background:#222c48;border:1px solid var(--border2);border-radius:6px;padding:1px 10px;color:#eaf0ff;}
+  .narr-tag{font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px;letter-spacing:.3px;}
+  .narr-tag.hit{background:rgba(70,215,168,.15);color:var(--green);}
+  .narr-tag.miss{background:rgba(255,107,122,.13);color:var(--red);}
+  .narr-lines{display:flex;flex-direction:column;gap:6px;}
+  .narr-line{display:flex;align-items:flex-start;gap:9px;padding:6px 10px;border-radius:8px;background:#11182a;border:1px solid var(--border);font-size:13px;line-height:1.55;}
+  .narr-line .arrow{flex-shrink:0;font-weight:800;color:var(--blue);width:16px;text-align:center;}
+  .narr-line .txt{color:#cdd6ee;}
+  .narr-line .txt b{color:#eaf0ff;}
+  .narr-line .freq{color:var(--amber);font-weight:700;}
+  .narr-line .k{display:inline-block;background:#222c48;border:1px solid var(--border2);border-radius:5px;padding:0 6px;font-weight:700;color:#eaf0ff;margin:0 1px;}
+  .narr-line.ok{border-color:rgba(70,215,168,.4);background:rgba(70,215,168,.06);}
+  .narr-line.ok .arrow{color:var(--green);}
+  .narr-line.no{border-color:rgba(255,107,122,.4);background:rgba(255,107,122,.06);}
+  .narr-line.no .arrow{color:var(--red);}
+  .narr-line.move{border-color:rgba(185,139,255,.32);background:rgba(185,139,255,.06);}
+  .narr-line.move .arrow{color:var(--purple);}
+  .narr-line.age{border-color:rgba(185,139,255,.4);background:rgba(185,139,255,.08);}
+  .narr-line.age .arrow{color:var(--purple);}
+  .hist{display:flex;flex-direction:column;gap:3px;max-height:188px;overflow:auto;}
+  .hist-row{font-size:12px;color:#9aa6c6;display:flex;gap:9px;align-items:center;padding:3px 6px;border-radius:6px;}
+  .hist-row .hs{color:var(--muted);flex-shrink:0;width:50px;}
+  .hist-row .hr{flex-shrink:0;width:14px;text-align:center;font-weight:700;}
+  .hist-row.hist-hit .hr{color:var(--green);}
+  .hist-row.hist-admit .hr{color:var(--blue);}
+  .hist-row.hist-reject .hr{color:var(--red);}
+  .hist-row.hist-miss .hr{color:var(--muted);}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-row">
+    <div class="brand"><b>W-TinyLFU</b> 算法可视化</div>
+    <div class="controls">
+      <button id="playBtn">▶ 播放</button>
+      <button id="stepBtn">⏭ 单步</button>
+      <button id="resetBtn">↺ 重置</button>
+      <label class="lbl">速度 <input id="speed" type="range" min="0.25" max="8" step="0.25" value="1"><span id="speedVal">1×</span></label>
+    </div>
+  </div>
+  <div class="header-row" style="margin-top:8px;">
+    <span class="lbl">负载</span>
+    <div class="seg" id="workloadSeg">
+      <button data-wl="random">随机</button>
+      <button data-wl="zipf" class="active">Zipf</button>
+      <button data-wl="scan">扫描</button>
+      <button data-wl="loop">循环</button>
+    </div>
+    <label class="lbl">总容量 <input id="cap" type="number" min="6" max="1000" value="50"><span class="modehint" id="modeHint"></span></label>
+    <label class="lbl">Window <input id="win" type="number" min="1" max="999" value="5"></label>
+    <label class="lbl">草图宽
+      <select id="skw"><option>8</option><option selected>16</option><option>32</option></select>
+    </label>
+  </div>
+  <div class="header-row wl-info-row">
+    <div id="wlInfo" class="wl-info"></div>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="card-title">访问流 <span class="hint">最近 16 次访问 · 绿=命中 / 红=未命中</span></div>
+    <div id="stream" class="stream"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">步骤解析 <span class="hint">当前这一步：发生了什么 · 为什么 · 结果</span></div>
+    <div id="narration"><div class="narr-empty">点击「单步」或「播放」开始…</div></div>
+    <div class="card-title" style="margin-top:14px;">操作历史 <span class="hint">最近 8 步一览 ·  newest on top</span></div>
+    <div id="history" class="hist"><div class="narr-empty">尚无记录</div></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">缓存结构 <span class="hint">≤40 容量：逐项动画视图 · &gt;40 容量：聚合柱状视图</span></div>
+    <div id="stage" class="stage">
+      <div id="tileLayer" class="layer">
+        <div class="row-label" style="top:14px">Window<span class="cnt" id="cntWin">0</span></div>
+        <div class="row-label" style="top:62px">Protected<span class="cnt" id="cntProt">0</span></div>
+        <div class="row-label" style="top:110px">Probationary<span class="cnt" id="cntProb">0</span></div>
+      </div>
+      <div id="aggLayer" class="layer agg-layer hidden"></div>
+    </div>
+    <div class="dir-hint">← MRU（最近使用）　　LRU（最先淘汰）→</div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">Count-Min Sketch 频率草图 <span class="hint">每次访问对 4 个哈希格 +1（4-bit，上限 15） · freq = min(4 格) · 每隔 10×容量 次访问整体减半（老化）</span></div>
+    <div class="sketch-wrap">
+      <div id="sketchGrid" class="sketch-grid"></div>
+      <div class="age-info">
+        <div>老化倒计时 <b id="ageCount">0 / 120</b></div>
+        <div class="agebar"><div id="ageFill" style="width:0%"></div></div>
+        <div style="margin-top:10px;">老化次数 <b id="ageTimes">0</b></div>
+        <div style="margin-top:10px;color:var(--muted);">颜色越偏红 = 频率估计越高</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">准入决策 <span class="hint">Window 溢出时：candidate 与 main 的 victim 比较频率，仅当 freq(candidate) &gt; freq(victim) 才准入</span></div>
+    <div id="admission" class="admission"><span class="muted">等待 Window 溢出触发准入决策…</span></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">统计</div>
+    <div id="stats" class="stats"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">图例与说明</div>
+    <div class="legend" style="margin-bottom:10px;">
+      <span><span class="sw" style="background:#1f3a5f;border-color:#3b6ea5"></span>Window（近期）</span>
+      <span><span class="sw" style="background:#1f4a36;border-color:#3aa56a"></span>Protected（已二次命中）</span>
+      <span><span class="sw" style="background:#4a3a1f;border-color:#a57a3b"></span>Probationary（新准入）</span>
+    </div>
+    <div class="notes">
+      <b>W-TinyLFU</b> = Window LRU + TinyLFU 准入 + Count-Min Sketch 频率估计。新 key 先入小 Window；
+      Window 溢出时其 LRU 作为 <b>candidate</b>，与主缓存 victim 比较 <code>freq</code>，胜者留下。<br>
+      <b>关于分区大小</b>：Protected 有硬上限（main 的 80%）；Probationary <b>没有独立硬上限</b>，它与 Protected 共享 main 空间，
+      实际可占到 <code>mainSize - Protected 数量</code>。只有 Protected 涨满后，Probationary 才回落到 ~20%（稳态占比）。
+      所以 Probationary 的分母会随 Protected 填充而动态收缩——这是正常的，不是溢出。<br>
+      容量 <b>≤40</b> 时显示逐项滑动动画；容量 <b>&gt;40</b>（可到 1000）自动切换为聚合柱状视图（每行显示占用率 + 最近若干项）。
+      试试：<b>切到「扫描」</b>负载看新 key 被拒绝（扫描抵抗）；<b>切到「Zipf/循环」</b>看热点被命中并晋升；
+      <b>单步</b>逐帧观察草图计数增长与老化减半。
+    </div>
+  </section>
+</main>
+
+<script>
+(function(){
+'use strict';
+
+/* ============ Config ============ */
+const config = {
+  capacity: 50,
+  windowSize: 5,
+  sketchWidth: 16,
+  numHashes: 4,
+  counterMax: 15,      // 4-bit
+  workload: 'zipf',
+  speed: 1,
+  baseInterval: 700,   // ms per access at 1x
+};
+const TILE_MODE_MAX = 40;          // 容量 ≤ 此值用逐项动画视图；更大用聚合视图
+const SEEDS = [0x9e3779b1, 0x85ebca77, 0xc2b2ae3d, 0x27d4eb2f];
+
+/* Key pool: 62 single-char + 两字符组合，到 1500 个（支持容量到 1000 且仍能驱逐） */
+const KEY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const ALL_KEYS = (function(){
+  const keys = [];
+  for (const c of KEY_CHARS) keys.push(c);
+  outer: for (const a of KEY_CHARS)
+    for (const b of KEY_CHARS){ keys.push(a + b); if (keys.length >= 1500) break outer; }
+  return keys;
+})();
+
+let mainSize, protectedSize, probationarySize, sampleSize;
+function recomputeSizes(){
+  mainSize = config.capacity - config.windowSize;
+  protectedSize = Math.floor(mainSize * 0.8);
+  probationarySize = mainSize - protectedSize;
+  sampleSize = 10 * config.capacity;
+}
+
+/* ============ PRNG & workload ============ */
+let prngState = 0x1234abcd >>> 0;
+function nextRand(){
+  prngState = (prngState + 0x6D2B79F5) | 0;
+  let t = Math.imul(prngState ^ (prngState >>> 15), 1 | prngState);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+/* Zipf cdf over the full key pool (recomputed once) */
+let zipfCum = [];
+function buildZipf(){
+  zipfCum = [];
+  const N = ALL_KEYS.length, s = 1.5; let denom = 0;
+  for (let r = 1; r <= N; r++) denom += 1 / Math.pow(r, s);
+  let c = 0;
+  for (let r = 1; r <= N; r++){ c += (1 / Math.pow(r, s)) / denom; zipfCum.push(c); }
+}
+function zipfKey(){
+  const u = nextRand();
+  let lo = 0, hi = zipfCum.length - 1;
+  while (lo < hi){ const mid = (lo + hi) >> 1; if (u <= zipfCum[mid]) hi = mid; else lo = mid + 1; }
+  return ALL_KEYS[lo];
+}
+function genKey(){
+  switch (config.workload){
+    case 'random': return ALL_KEYS[Math.floor(nextRand() * ALL_KEYS.length)];
+    case 'zipf':   return zipfKey();
+    case 'scan':   return ALL_KEYS[state.accesses % ALL_KEYS.length];   // 顺序扫描整个 key 空间
+    case 'loop':   return ALL_KEYS[state.accesses % 5];                 // 5 个热点循环
+    default: return zipfKey();
+  }
+}
+
+/* ============ Workload descriptions ============ */
+const WORKLOAD_INFO = {
+  random: {
+    name: '随机 Random',
+    rule: '每次从 1500 个 key 中均匀随机抽取，每个 key 概率相等。',
+    model: '没有任何热点的纯均匀访问（理想化的散列流量）。',
+    watch: '几乎没有重复 → 命中率很低，Protected 难填满、Probationary 承担主体。缓存最难的场景。'
+  },
+  zipf: {
+    name: 'Zipf（默认）',
+    rule: '幂律分布 s=1.5：少数 key 极热（概率 ∝ 1/rank¹·⁵），长尾大量冷 key。',
+    model: '最贴近真实——网页访问、搜索词、API、热门商品等。',
+    watch: '热点高频出现 → 晋升 Protected 并稳住，命中率较高。W-TinyLFU 最擅长的场景。'
+  },
+  scan: {
+    name: '扫描 Scan',
+    rule: '按顺序遍历整个 key 空间 0,1,2,…,1499 再循环，每个 key 一次性出现。',
+    model: '全表扫描、批量导出、备份——一次性洪水式新 key。',
+    watch: '测扫描抵抗：缓存应通过频率比较 cf≤vf 拒绝洪水、保护热点。会看到大量 ❌ 拒绝。'
+  },
+  loop: {
+    name: '循环 Loop',
+    rule: '只在前 5 个 key（A~E）间反复循环。',
+    model: '极小固定工作集被反复访问（小热表、定时轮询几个资源）。',
+    watch: '5 个 key 全缓存 → 命中率≈100%。但会看到"前几个进 Protected、最后 2 个卡在 Window"的现象。'
+  }
+};
+function updateWorkloadInfo(){
+  if (!wlInfoEl) return;
+  const w = WORKLOAD_INFO[config.workload] || WORKLOAD_INFO.zipf;
+  wlInfoEl.innerHTML =
+    '<span class="wl-name">' + w.name + '</span>' +
+    '<span class="wl-field"><b>规则：</b>' + w.rule + '</span>' +
+    '<span class="wl-field"><b>模拟：</b>' + w.model + '</span>' +
+    '<span class="wl-field watch"><b>观察：</b>' + w.watch + '</span>';
+}
+
+/* ============ Model (pure state, no DOM) ============ */
+let state;
+function freshState(){
+  return {
+    window: [], probationary: [], protected: [],
+    sketch: Array.from({length: config.numHashes}, () => new Array(config.sketchWidth).fill(0)),
+    accesses: 0, hits: 0, misses: 0, sketchResets: 0, sinceAge: 0,
+  };
+}
+function hashIndex(key, seed){
+  let h = seed | 0;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h & (config.sketchWidth - 1);
+}
+function freqOf(key){
+  let m = config.counterMax;
+  for (let i = 0; i < config.numHashes; i++){
+    const v = state.sketch[i][hashIndex(key, SEEDS[i])];
+    if (v < m) m = v;
+  }
+  return m;
+}
+function bumpSketch(key){
+  const cells = [];
+  for (let i = 0; i < config.numHashes; i++){
+    const idx = hashIndex(key, SEEDS[i]);
+    if (state.sketch[i][idx] < config.counterMax) state.sketch[i][idx]++;
+    cells.push([i, idx]);
+  }
+  return cells;
+}
+function maybeAge(){
+  if (state.sinceAge >= sampleSize){
+    for (let i = 0; i < config.numHashes; i++)
+      for (let j = 0; j < config.sketchWidth; j++)
+        state.sketch[i][j] = (state.sketch[i][j] + 1) >>> 1;  // 向上取整减半
+    state.sketchResets++;
+    state.sinceAge = 0;
+    return true;
+  }
+  return false;
+}
+function removeFrom(arr, key){ const i = arr.indexOf(key); if (i !== -1) arr.splice(i, 1); return i; }
+
+function step(key){
+  const events = [];
+  state.accesses++; state.sinceAge++;
+  events.push({type:'sketchBump', key, cells: bumpSketch(key)});
+
+  let hit = false, hitRegion = null;
+  if (removeFrom(state.window, key) !== -1){
+    hit = true; hitRegion = 'window';
+    state.window.unshift(key);
+    events.push({type:'hit', key, region:'window'});
+  } else if (removeFrom(state.probationary, key) !== -1){
+    hit = true; hitRegion = 'probationary';
+    if (protectedSize > 0){
+      if (state.protected.length >= protectedSize){
+        const demoted = state.protected.pop();
+        state.probationary.unshift(demoted);
+        events.push({type:'demote', key: demoted});
+      }
+      state.protected.unshift(key);
+      events.push({type:'promote', key, from:'probationary', to:'protected'});
+    } else {
+      state.probationary.unshift(key);
+      events.push({type:'hit', key, region:'probationary'});
+    }
+  } else if (removeFrom(state.protected, key) !== -1){
+    hit = true; hitRegion = 'protected';
+    state.protected.unshift(key);
+    events.push({type:'hit', key, region:'protected'});
+  }
+
+  if (hit){
+    state.hits++;
+  } else {
+    state.misses++;
+    events.push({type:'miss', key});
+    state.window.unshift(key);
+    events.push({type:'addWindow', key});
+    while (state.window.length > config.windowSize){
+      const candidate = state.window.pop();
+      const mainTotal = state.probationary.length + state.protected.length;
+      if (mainTotal < mainSize){
+        state.probationary.unshift(candidate);
+        events.push({type:'admit', key: candidate, reason:'space',
+          candidateFreq: freqOf(candidate), victimFreq: null, victim: null});
+      } else {
+        let victim, victimRegion;
+        if (state.probationary.length){ victimRegion = 'probationary'; victim = state.probationary[state.probationary.length - 1]; }
+        else if (state.protected.length){ victimRegion = 'protected'; victim = state.protected[state.protected.length - 1]; }
+        else {
+          state.probationary.unshift(candidate);
+          events.push({type:'admit', key: candidate, reason:'space',
+            candidateFreq: freqOf(candidate), victimFreq: null, victim: null});
+          continue;
+        }
+        const cf = freqOf(candidate), vf = freqOf(victim);
+        if (cf > vf){
+          if (victimRegion === 'probationary') state.probationary.pop();
+          else state.protected.pop();
+          state.probationary.unshift(candidate);
+          events.push({type:'admit', key: candidate, reason:'freq',
+            candidateFreq: cf, victimFreq: vf, victim, victimRegion});
+          events.push({type:'evict', key: victim, region: victimRegion});
+        } else {
+          events.push({type:'reject', key: candidate,
+            candidateFreq: cf, victimFreq: vf, victim, victimRegion});
+        }
+      }
+    }
+  }
+
+  if (maybeAge()) events.push({type:'age'});
+  events.push({type:'access', key, hit, region: hitRegion});
+  return events;
+}
+
+/* ============ DOM refs ============ */
+const playBtn   = document.getElementById('playBtn');
+const stepBtn   = document.getElementById('stepBtn');
+const resetBtn  = document.getElementById('resetBtn');
+const speedInput= document.getElementById('speed');
+const speedVal  = document.getElementById('speedVal');
+const workloadSeg = document.getElementById('workloadSeg');
+const capInput  = document.getElementById('cap');
+const winInput  = document.getElementById('win');
+const skwInput  = document.getElementById('skw');
+const modeHint  = document.getElementById('modeHint');
+const stageEl   = document.getElementById('stage');
+const tileLayer = document.getElementById('tileLayer');
+const aggLayer  = document.getElementById('aggLayer');
+const streamEl  = document.getElementById('stream');
+const sketchGridEl = document.getElementById('sketchGrid');
+const admissionEl = document.getElementById('admission');
+const statsEl   = document.getElementById('stats');
+const ageCountEl= document.getElementById('ageCount');
+const ageFillEl = document.getElementById('ageFill');
+const ageTimesEl= document.getElementById('ageTimes');
+const cntWinEl  = document.getElementById('cntWin');
+const cntProtEl = document.getElementById('cntProt');
+const cntProbEl = document.getElementById('cntProb');
+const narrationEl= document.getElementById('narration');
+const historyEl  = document.getElementById('history');
+const wlInfoEl   = document.getElementById('wlInfo');
+
+const PAD_X = 120, Y_WINDOW = 14, Y_PROTECTED = 62, Y_PROBATIONARY = 110;
+let SLOT = 48, ITEM_W = 40, ITEM_FONT = 17;
+
+/* ============ Tile elements (on-demand) ============ */
+const itemEls = {};
+const leaving = new Set();
+function ensureItemEl(key){
+  let el = itemEls[key];
+  if (!el){
+    el = document.createElement('div');
+    el.className = 'item';
+    el.textContent = key;
+    el.style.opacity = '0';
+    tileLayer.appendChild(el);
+    itemEls[key] = el;
+  }
+  return el;
+}
+
+/* ============ Sketch grid ============ */
+const sketchCells = []; // [r][c]
+function buildSketchGrid(){
+  sketchGridEl.innerHTML = '';
+  sketchCells.length = 0;
+  sketchGridEl.style.gridTemplateColumns = 'repeat(' + config.sketchWidth + ', 1fr)';
+  for (let r = 0; r < config.numHashes; r++){
+    const row = [];
+    for (let c = 0; c < config.sketchWidth; c++){
+      const cell = document.createElement('div');
+      cell.className = 'sketch-cell';
+      cell.textContent = '0';
+      sketchGridEl.appendChild(cell);
+      row.push(cell);
+    }
+    sketchCells.push(row);
+  }
+}
+
+/* ============ Aggregate layer (built once) ============ */
+const aggRows = {};
+function buildAggLayer(){
+  aggLayer.innerHTML = '';
+  const defs = [
+    ['window', 'Window', 'window'],
+    ['protected', 'Protected', 'protected'],
+    ['probationary', 'Probationary', 'probationary'],
+  ];
+  for (const [name, label, region] of defs){
+    const row = document.createElement('div');
+    row.className = 'agg-row';
+    row.innerHTML =
+      '<div class="agg-label">' + label + '<br><span class="cnt" data-cnt="' + name + '">0</span></div>' +
+      '<div class="agg-bar-wrap">' +
+        '<div class="agg-bar" data-bar="' + name + '">' +
+          '<div class="agg-fill region-' + region + '" data-fill="' + name + '"></div>' +
+          '<span class="agg-count" data-count="' + name + '">0</span>' +
+        '</div>' +
+        '<div class="agg-chips" data-chips="' + name + '"></div>' +
+      '</div>';
+    aggLayer.appendChild(row);
+    aggRows[name] = {
+      bar:   row.querySelector('[data-bar="' + name + '"]'),
+      fill:  row.querySelector('[data-fill="' + name + '"]'),
+      count: row.querySelector('[data-count="' + name + '"]'),
+      cnt:   row.querySelector('[data-cnt="' + name + '"]'),
+      chips: row.querySelector('[data-chips="' + name + '"]'),
+      region: region,
+    };
+  }
+}
+
+/* ============ Render ============ */
+let mode = 'tile';
+let activeKey = null;
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+function heatColor(v){
+  const t = v / config.counterMax;
+  const h = 210 - t * 210;       // blue(210) -> red(0)
+  const s = 55 + t * 25;
+  const l = 16 + t * 30;
+  return 'hsl(' + h + ',' + s + '%,' + l + '%)';
+}
+
+function computeSlot(){
+  const avail = (tileLayer.clientWidth || 900) - PAD_X - 20;
+  const longest = Math.max(protectedSize, probationarySize, config.windowSize, 1);
+  SLOT = clamp(Math.floor(avail / longest), 20, 48);
+  ITEM_W = SLOT - 6;
+  ITEM_FONT = clamp(SLOT - 14, 10, 17);
+}
+
+function renderItems(){
+  computeSlot();
+  const placed = new Set();
+  const rows = [
+    {arr: state.window,       y: Y_WINDOW,       region: 'window'},
+    {arr: state.protected,    y: Y_PROTECTED,    region: 'protected'},
+    {arr: state.probationary, y: Y_PROBATIONARY, region: 'probationary'},
+  ];
+  for (const r of rows){
+    for (let i = 0; i < r.arr.length; i++){
+      const key = r.arr[i];
+      const el = ensureItemEl(key);
+      leaving.delete(key);
+      el.style.width = ITEM_W + 'px';
+      el.style.height = ITEM_W + 'px';
+      el.style.fontSize = ITEM_FONT + 'px';
+      el.style.transform = 'translate(' + (PAD_X + i * SLOT) + 'px,' + r.y + 'px)';
+      el.style.opacity = '1';
+      el.classList.remove('region-window','region-protected','region-probationary');
+      el.classList.add('region-' + r.region);
+      placed.add(key);
+    }
+  }
+  for (const key in itemEls){
+    if (!placed.has(key) && !leaving.has(key)){
+      leaving.add(key);
+      const el = itemEls[key];
+      el.style.opacity = '0';
+      const k = key;
+      setTimeout(() => { if (leaving.has(k)){ el.remove(); delete itemEls[k]; leaving.delete(k); } }, 450);
+    }
+  }
+  for (const k in itemEls){
+    itemEls[k].classList.toggle('active', k === activeKey);
+  }
+  cntWinEl.textContent  = state.window.length + '/' + config.windowSize;
+  cntProtEl.textContent = state.protected.length + '/' + (protectedSize || 0);
+  cntProbEl.textContent = state.probationary.length + '/' + (mainSize - state.protected.length);
+}
+
+function renderAggregate(){
+  const regions = [
+    ['window', state.window, config.windowSize],
+    ['protected', state.protected, protectedSize],
+    ['probationary', state.probationary, mainSize - state.protected.length],
+  ];
+  for (const [name, arr, cap] of regions){
+    const r = aggRows[name];
+    const pct = cap ? (arr.length / cap * 100) : 0;
+    r.fill.style.width = pct + '%';
+    r.count.textContent = arr.length + '/' + cap;
+    r.cnt.textContent = arr.length + '/' + cap;
+    const recent = arr.slice(0, 14);
+    let html = '';
+    for (const k of recent) html += '<span class="chip2 region-' + r.region + '">' + k + '</span>';
+    r.chips.innerHTML = html;
+  }
+}
+
+function renderSketch(){
+  for (let r = 0; r < config.numHashes; r++)
+    for (let c = 0; c < config.sketchWidth; c++){
+      const v = state.sketch[r][c];
+      const cell = sketchCells[r][c];
+      cell.textContent = v;
+      cell.style.background = heatColor(v);
+    }
+}
+function renderStats(){
+  const hr = state.accesses ? (state.hits / state.accesses * 100).toFixed(1) : '0.0';
+  statsEl.innerHTML =
+    stat('访问', state.accesses) +
+    stat('命中', state.hits, true) +
+    stat('未命中', state.misses) +
+    stat('命中率', hr + '%', true) +
+    stat('老化次数', state.sketchResets);
+  ageCountEl.textContent = state.sinceAge + ' / ' + sampleSize;
+  ageFillEl.style.width = (state.sinceAge / sampleSize * 100) + '%';
+  ageTimesEl.textContent = state.sketchResets;
+}
+function stat(lbl, num, hl){ return '<div class="stat' + (hl ? ' hl' : '') + '"><span class="num">' + num + '</span><span class="lbl">' + lbl + '</span></div>'; }
+function renderFrame(){
+  if (mode === 'tile') renderItems(); else renderAggregate();
+  renderSketch(); renderStats();
+}
+
+/* ============ Event-driven pulses ============ */
+function pulseCell(r, c){
+  const el = sketchCells[r][c];
+  el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
+}
+function flashItem(key, cls){
+  const el = itemEls[key]; if (!el) return;
+  el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), 600);
+}
+function flashAggRegion(name, cls){
+  const r = aggRows[name]; if (!r) return;
+  r.bar.classList.remove(cls); void r.bar.offsetWidth; r.bar.classList.add(cls);
+  setTimeout(() => r.bar.classList.remove(cls), 600);
+}
+function flashAdmit(key){ if (mode === 'tile') flashItem(key, 'flash-admit'); else flashAggRegion('probationary', 'flash-admit'); }
+function flashReject(victimRegion){ if (mode === 'tile'){ if (victimRegion) flashItem(state.probationary[state.probationary.length-1] || '', 'flash-keep'); } else flashAggRegion('probationary', 'flash-reject'); }
+function flashEvict(victimRegion){ if (mode === 'tile') {} else if (victimRegion) flashAggRegion(victimRegion, 'flash-evict'); }
+function flashHit(region){ if (mode === 'aggregate' && region) flashAggRegion(region, 'flash-hit'); }
+function flashAge(){
+  sketchGridEl.classList.remove('age-flash'); void sketchGridEl.offsetWidth; sketchGridEl.classList.add('age-flash');
+}
+function appendStreamChip(key, hit){
+  const chip = document.createElement('span');
+  chip.className = 'chip ' + (hit ? 'hit' : 'miss');
+  chip.textContent = key;
+  streamEl.appendChild(chip);
+  while (streamEl.children.length > 16) streamEl.removeChild(streamEl.firstChild);
+}
+function updateAdmission(e, admitted){
+  const cf = e.candidateFreq, vf = e.victimFreq;
+  const vBarPct = (vf != null ? vf / config.counterMax * 100 : 0);
+  let verdict, vcls, detail;
+  if (admitted){
+    vcls = 'ok';
+    if (e.victim){ verdict = '✅ 准入'; detail = '（' + e.victim + ' 被驱逐）'; }
+    else { verdict = '✅ 准入'; detail = '（主缓存有空位，无需驱逐）'; }
+  } else {
+    vcls = 'no'; verdict = '❌ 拒绝'; detail = '（' + e.key + ' 丢弃，' + e.victim + ' 保留）';
+  }
+  admissionEl.innerHTML =
+    cmp('candidate', e.key, cf, cf / config.counterMax * 100, 'cand') +
+    '<span class="vs">vs</span>' +
+    cmp('victim', e.victim || '—', vf != null ? vf : '—', vBarPct, 'vict') +
+    '<div class="verdict ' + vcls + '">' + verdict + ' <span style="opacity:.8;font-weight:400">' + detail + '</span></div>';
+}
+function cmp(role, key, freq, pct, cls){
+  return '<div class="cmp ' + cls + '"><span class="role">' + role + '</span>' +
+    '<span class="key">' + key + '</span>' +
+    '<div class="bar"><div style="width:' + pct + '%"></div></div>' +
+    '<span class="freq">' + freq + '</span></div>';
+}
+function processEvents(events){
+  for (const e of events){
+    switch (e.type){
+      case 'sketchBump': for (const c of e.cells) pulseCell(c[0], c[1]); break;
+      case 'access': appendStreamChip(e.key, e.hit); activeKey = e.key; if (e.hit && e.region) flashHit(e.region); break;
+      case 'admit':  flashAdmit(e.key); updateAdmission(e, true); break;
+      case 'reject': flashItem(e.key, 'flash-reject'); if (e.victim) flashItem(e.victim, 'flash-keep'); updateAdmission(e, false); flashReject(e.victimRegion); break;
+      case 'evict':  flashItem(e.key, 'flash-evict'); flashEvict(e.region); break;
+      case 'age':    flashAge(); break;
+    }
+  }
+}
+
+/* ============ Step narration ============ */
+const narrHistory = [];
+const HIST_MAX = 8;
+function regionName(r){ return ({window:'Window', probationary:'Probationary', protected:'Protected'})[r] || r; }
+function keyTag(k){ return '<span class="k">' + k + '</span>'; }
+
+function buildNarration(events){
+  const access  = events.find(e => e.type === 'access');
+  const key     = access ? access.key : '?';
+  const hit     = !!(access && access.hit);
+  const region  = access ? access.region : null;
+  const promote = events.find(e => e.type === 'promote');
+  const demote  = events.find(e => e.type === 'demote');
+  const admit   = events.find(e => e.type === 'admit');
+  const reject  = events.find(e => e.type === 'reject');
+  const aged    = events.find(e => e.type === 'age');
+
+  let head = '<div class="narr-head">';
+  head += '<span class="narr-step">第 ' + state.accesses + ' 步</span>';
+  head += '<span class="narr-key">' + key + '</span>';
+  head += hit
+    ? '<span class="narr-tag hit">命中 · ' + regionName(region) + '</span>'
+    : '<span class="narr-tag miss">未命中</span>';
+  head += '</div>';
+
+  const L = [];
+  // ① 频率更新
+  L.push({cls:'info', n:'①', txt:'频率草图：' + keyTag(key) + ' 的计数 +1（更新 4 个哈希格）'});
+
+  // ② 访问结果
+  if (hit){
+    if (region === 'probationary' && promote)
+      L.push({cls:'move', n:'②', txt:'在 Probationary 命中（第二次访问）→ 触发晋升'});
+    else
+      L.push({cls:'move', n:'②', txt:'在 ' + regionName(region) + ' 命中 → 提到最近端（MRU），续命'});
+  } else {
+    L.push({cls:'info', n:'②', txt:'缓存未命中 → ' + keyTag(key) + ' 加入 Window'});
+  }
+
+  // ③ 后续变动（降级 / 晋升 / 准入 / 拒绝）
+  if (demote)
+    L.push({cls:'move', n:'③', txt:'Protected 已满 → ' + keyTag(demote.key) + ' 从 Protected 降级到 Probationary（为晋升腾位）'});
+  if (promote)
+    L.push({cls:'move', n:'③', txt:keyTag(promote.key) + ' 晋升到 Protected（已被二次命中，确认为热点）'});
+  if (admit){
+    if (admit.reason === 'space'){
+      L.push({cls:'ok', n:'③', txt:'Window 溢出，候选 ' + keyTag(admit.key) + ' 被挤出 → 主缓存还有空位 → 直接准入 Probationary（无需比较频率）'});
+    } else {
+      L.push({cls:'ok', n:'③', txt:'Window 溢出，候选 ' + keyTag(admit.key) + ' 被挤出 → 准入比较：' +
+        keyTag(admit.key) + '(频率<span class="freq">' + admit.candidateFreq + '</span>) vs 牺牲者 ' + keyTag(admit.victim) + '(频率<span class="freq">' + admit.victimFreq + '</span>) → <b>' +
+        admit.candidateFreq + ' &gt; ' + admit.victimFreq + '</b> ✅ 准入，' + keyTag(admit.victim) + ' 被驱逐'});
+    }
+  }
+  if (reject)
+    L.push({cls:'no', n:'③', txt:'Window 溢出，候选 ' + keyTag(reject.key) + ' 被挤出 → 准入比较：' +
+      keyTag(reject.key) + '(频率<span class="freq">' + reject.candidateFreq + '</span>) vs 牺牲者 ' + keyTag(reject.victim) + '(频率<span class="freq">' + reject.victimFreq + '</span>) → <b>' +
+      reject.candidateFreq + ' ≤ ' + reject.victimFreq + '</b> ❌ 拒绝，' + keyTag(reject.victim) + ' 保留，' + keyTag(reject.key) + ' 丢弃'});
+
+  // ④ 老化
+  if (aged)
+    L.push({cls:'age', n:'④', txt:'🌗 频率草图老化：所有计数减半（向上取整），更看重近期访问'});
+
+  let body = '<div class="narr-lines">';
+  for (const l of L) body += '<div class="narr-line ' + l.cls + '"><span class="arrow">' + l.n + '</span><span class="txt">' + l.txt + '</span></div>';
+  body += '</div>';
+  return head + body;
+}
+
+function buildHistoryLine(events){
+  const access = events.find(e => e.type === 'access');
+  const key = access ? access.key : '?';
+  const admit = events.find(e => e.type === 'admit');
+  const reject = events.find(e => e.type === 'reject');
+  const promote = events.find(e => e.type === 'promote');
+  const aged = events.some(e => e.type === 'age');
+  let icon, text, cls;
+  if (access && access.hit){
+    icon = '✓'; cls = 'hit';
+    text = promote ? '命中 Probationary → 晋升 Protected' : ('命中 ' + regionName(access.region));
+  } else if (admit){
+    icon = '↓'; cls = 'admit';
+    text = admit.reason === 'space'
+      ? (key + ' 准入 Probationary（空位）')
+      : (key + ' 准入（频率 ' + admit.candidateFreq + '>' + admit.victimFreq + '，驱逐 ' + admit.victim + '）');
+  } else if (reject){
+    icon = '✗'; cls = 'reject';
+    text = key + ' 被拒（频率 ' + reject.candidateFreq + '≤' + reject.victimFreq + '）';
+  } else {
+    icon = '＋'; cls = 'miss';
+    text = key + ' 进 Window';
+  }
+  if (aged) text += '  🌗';
+  return {n: state.accesses, icon, text, cls};
+}
+
+function renderNarration(events){
+  if (!narrationEl) return;
+  narrationEl.innerHTML = buildNarration(events);
+  narrHistory.unshift(buildHistoryLine(events));
+  if (narrHistory.length > HIST_MAX) narrHistory.length = HIST_MAX;
+  let html = '';
+  for (const h of narrHistory){
+    html += '<div class="hist-row hist-' + h.cls + '"><span class="hs">#' + h.n + '</span><span class="hr">' + h.icon + '</span><span>' + h.text + '</span></div>';
+  }
+  historyEl.innerHTML = html;
+}
+
+/* ============ Engine ============ */
+let running = false, rafId = null, lastTime = 0, acc = 0;
+function advanceOne(){
+  const key = genKey();
+  const events = step(key);
+  processEvents(events);
+  renderNarration(events);
+  renderFrame();
+}
+function loop(t){
+  if (!running) return;
+  if (!lastTime) lastTime = t;
+  const dt = Math.min(t - lastTime, 200); lastTime = t;
+  acc += dt;
+  const interval = config.baseInterval / config.speed;
+  let n = 0;
+  while (acc >= interval && n < 12){ acc -= interval; advanceOne(); n++; }
+  if (acc > interval * 2) acc = interval; // shed backlog
+  rafId = requestAnimationFrame(loop);
+}
+function play(){ if (running) return; running = true; lastTime = 0; updatePlayBtn(); rafId = requestAnimationFrame(loop); }
+function pause(){ running = false; if (rafId) cancelAnimationFrame(rafId); rafId = null; updatePlayBtn(); }
+function togglePlay(){ running ? pause() : play(); }
+function updatePlayBtn(){ playBtn.textContent = running ? '⏸ 暂停' : '▶ 播放'; playBtn.classList.toggle('playing', running); }
+
+/* ============ Reset / init ============ */
+function clearItemEls(){
+  for (const k in itemEls){ itemEls[k].remove(); delete itemEls[k]; }
+  leaving.clear();
+}
+function resetAll(){
+  pause();
+  recomputeSizes();
+  state = freshState();
+  prngState = 0x1234abcd >>> 0;
+  activeKey = null;
+  streamEl.innerHTML = '';
+  admissionEl.innerHTML = '<span class="muted">等待 Window 溢出触发准入决策…</span>';
+  narrationEl.innerHTML = '<div class="narr-empty">点击「单步」或「播放」开始…</div>';
+  narrHistory.length = 0;
+  historyEl.innerHTML = '<div class="narr-empty">尚无记录</div>';
+  clearItemEls();
+  mode = config.capacity <= TILE_MODE_MAX ? 'tile' : 'aggregate';
+  tileLayer.classList.toggle('hidden', mode !== 'tile');
+  aggLayer.classList.toggle('hidden', mode !== 'aggregate');
+  modeHint.textContent = mode === 'tile' ? '(逐项动画)' : '(聚合视图)';
+  buildSketchGrid();
+  renderFrame();
+}
+function bindControls(){
+  playBtn.onclick = togglePlay;
+  stepBtn.onclick = () => { pause(); advanceOne(); };
+  resetBtn.onclick = resetAll;
+  speedInput.oninput = () => { config.speed = parseFloat(speedInput.value); speedVal.textContent = config.speed + '×'; };
+  workloadSeg.querySelectorAll('button').forEach(b => {
+    b.onclick = () => {
+      config.workload = b.dataset.wl;
+      workloadSeg.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      updateWorkloadInfo();
+    };
+  });
+  capInput.oninput = () => {
+    const v = parseInt(capInput.value);
+    if (isNaN(v) || v < 6) return;             // 等待输入完整（如正输 "1" 想输 "100"）
+    const clamped = clamp(v, 6, 1000);
+    if (clamped === config.capacity && capInput.value === String(clamped)) return;
+    config.capacity = clamped; capInput.value = clamped;
+    if (config.windowSize >= clamped){ config.windowSize = Math.max(1, Math.min(2, clamped - 1)); winInput.value = config.windowSize; }
+    resetAll();
+  };
+  winInput.oninput = () => {
+    const v = parseInt(winInput.value);
+    if (isNaN(v) || v < 1) return;
+    const clamped = clamp(v, 1, config.capacity - 1);
+    if (clamped === config.windowSize && winInput.value === String(clamped)) return;
+    config.windowSize = clamped; winInput.value = clamped;
+    resetAll();
+  };
+  skwInput.onchange = () => { config.sketchWidth = parseInt(skwInput.value); resetAll(); };
+}
+
+function init(){
+  recomputeSizes();
+  buildZipf();
+  buildAggLayer();
+  bindControls();
+  updateWorkloadInfo();
+  resetAll();
+}
+init();
+})();
+</script>
+</body>
+</html>
